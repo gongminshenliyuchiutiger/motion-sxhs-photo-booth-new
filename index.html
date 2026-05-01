@@ -1,0 +1,1211 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>雙溪高中拍貼機系統｜SXHS Photo Booth System</title>
+    
+    <!-- Fabric.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/fabric.js/5.3.1/fabric.min.js"></script>
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;600&family=Zen+Maru+Gothic:wght@400;500;700&family=Itim&display=swap" rel="stylesheet">
+    
+    <!-- MediaPipe Hands -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <style>
+        :root {
+            /* 青春校園配色 */
+            --primary: #66A6FF;       /* 清新校園藍 */
+            --primary-dark: #3B7AD4;  /* 活力深藍 */
+            --accent: #EBF3FF;        /* 淺天藍 */
+            --text-main: #3A4759;     /* 柔和深灰藍 */
+            --text-light: #95A3B8;    /* 淺灰藍 */
+            --card-bg: #FFFFFF;       /* 純白 */
+            --bg-body: #F5F9FF;       /* 天空微藍背景 */
+            --btn-shadow: rgba(102, 166, 255, 0.3);
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            font-family: 'Zen Maru Gothic', 'Noto Serif TC', sans-serif;
+            background-color: var(--bg-body);
+            background-image: radial-gradient(#dbeafe 1px, transparent 1px);
+            background-size: 20px 20px;
+            color: var(--text-main);
+            margin: 0;
+            padding: 20px 10px;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+            overflow-x: hidden;
+        }
+
+        #floating-background {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            z-index: 0; pointer-events: none; overflow: hidden;
+        }
+        /* 統一漂浮元素的動畫與樣式 */
+        .floating-icon-wrapper {
+            position: absolute; bottom: -200px; opacity: 0.4;
+            animation: floatUp linear forwards;
+            filter: blur(0.5px); 
+            pointer-events: auto; /* 允許滑鼠互動 */
+        }
+        .floating-icon {
+            transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275), opacity 0.3s;
+            cursor: pointer;
+            pointer-events: auto;
+        }
+        @keyframes floatUp {
+            0% { transform: translateY(0) rotate(0deg); opacity: 0; }
+            10% { opacity: 0.6; }
+            90% { opacity: 0.6; }
+            100% { transform: translateY(-110vh) rotate(360deg); opacity: 0; }
+        }
+
+        .app-shell {
+            width: 100%; max-width: 480px; 
+            background: var(--card-bg); 
+            border-radius: 20px;
+            box-shadow: 0 8px 30px rgba(64, 81, 59, 0.1);
+            border: 2px solid #fff;
+            padding: 24px;
+            display: flex; flex-direction: column; align-items: center; gap: 20px;
+            position: relative; z-index: 10;
+        }
+
+        h1 {
+            font-family: 'Itim', 'Zen Maru Gothic', cursive; 
+            color: var(--primary-dark);
+            margin: 0; font-size: clamp(1.1rem, 5.5vw, 1.6rem); 
+            letter-spacing: 0.5px; 
+            display: flex; align-items: center; justify-content: center; gap: 8px;
+            white-space: nowrap;
+        }
+
+        .mascot-container {
+            position: fixed; bottom: 20px; left: 20px; width: 100px; 
+            z-index: 999; cursor: grab; touch-action: none; user-select: none;
+        }
+        .mascot-container:active { cursor: grabbing; }
+        .mascot-img {
+            width: 100%; filter: drop-shadow(0 4px 5px rgba(0,0,0,0.15)); 
+            transition: transform 0.3s; pointer-events: none;
+        }
+        .mascot-container:hover .mascot-img {
+            transform: scale(1.1) rotate(5deg);
+        }
+
+        .viewport-container {
+            width: 100%; aspect-ratio: 4/3; background: #e2e8f0;
+            border-radius: 12px; overflow: hidden; position: relative;
+            box-shadow: inset 0 0 20px rgba(102, 166, 255, 0.1); 
+            border: 6px solid #fff;
+        }
+        video { 
+            position: absolute; top:0; left:0; width: 100%; height: 100%; 
+            object-fit: cover; transform: scaleX(-1); z-index: 1;
+        }
+        #particle-canvas {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            pointer-events: none; z-index: 10;
+        }
+        
+        #countdown-overlay {
+            position: absolute; inset: 0; background: rgba(255,255,255,0.4);
+            backdrop-filter: blur(2px);
+            display: none; justify-content: center; align-items: center;
+            color: var(--primary-dark); font-size: 6rem; font-weight: 800; z-index: 20;
+            font-family: 'Itim', cursive;
+        }
+        
+        #gesture-hint {
+            position: absolute; top: 10px; right: 10px;
+            background: rgba(102, 166, 255, 0.9); color: white;
+            padding: 6px 14px; border-radius: 20px; font-size: 0.85rem;
+            display: none; z-index: 15; align-items: center; gap: 6px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .pulse { animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0% { opacity: 0.8; } 50% { opacity: 1; transform: scale(1.05); } 100% { opacity: 0.8; } }
+
+        .control-group { width: 100%; display: flex; flex-direction: column; align-items: center; gap: 15px; }
+
+        .mode-tabs {
+            background: var(--accent); padding: 5px; border-radius: 50px;
+            display: flex; width: 100%; justify-content: space-between;
+            box-shadow: inset 0 2px 4px rgba(102, 166, 255, 0.1);
+        }
+        .mode-tab {
+            flex: 1; border: none; background: transparent; padding: 10px 0; border-radius: 40px;
+            font-size: 0.9rem; font-weight: bold; color: var(--text-light); cursor: pointer; transition: 0.3s;
+            font-family: 'Zen Maru Gothic', sans-serif;
+        }
+        .mode-tab.active { background: #fff; color: var(--primary-dark); box-shadow: 0 2px 8px rgba(102, 166, 255, 0.2); }
+
+        #status-display {
+            font-size: 0.95rem; font-weight: 600; color: var(--primary);
+            height: 24px; display: flex; align-items: center; gap: 8px;
+        }
+
+        .btn-main {
+            width: 100%; padding: 15px; border-radius: 12px; border: none;
+            background: var(--primary); color: white; font-size: 1.1rem; font-weight: bold;
+            cursor: pointer; box-shadow: 0 4px 15px -2px var(--btn-shadow);
+            transition: all 0.2s; display: flex; justify-content: center; align-items: center; gap: 10px;
+            font-family: 'Zen Maru Gothic', sans-serif;
+        }
+        .btn-main:active { transform: scale(0.98); background: var(--primary-dark); }
+        .btn-main:disabled { background: #d1d5db; box-shadow: none; cursor: not-allowed; }
+        .btn-secondary { background: #9da3a0; box-shadow: 0 4px 15px -2px rgba(157, 163, 160, 0.4); }
+
+        .preview-row { display: flex; gap: 10px; justify-content: center; width: 100%; margin-top: 5px; }
+        .preview-item {
+            width: 70px; height: 52px; background: #f1f5f9; border-radius: 8px;
+            border: 2px solid #fff; box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+            background-size: cover; background-position: center;
+            display: flex; justify-content: center; align-items: center; color: #cbd5e1;
+            position: relative; overflow: hidden; cursor: pointer;
+            transition: transform 0.2s, border-color 0.2s;
+        }
+        .preview-item.selected { border: 2px solid var(--primary); transform: scale(1.05); }
+        .preview-overlay {
+            position: absolute; inset: 0; background: rgba(59, 122, 212, 0.6);
+            display: none; justify-content: center; align-items: center;
+        }
+        .preview-item.has-img:hover .preview-overlay { display: flex; }
+        
+        .mini-btn {
+            font-size: 11px; padding: 4px 10px; border-radius: 20px; border: none; cursor: pointer;
+            color: white; background: rgba(255,255,255,0.2); backdrop-filter: blur(2px);
+            display: flex; align-items: center; gap: 4px; pointer-events: auto;
+            border: 1px solid rgba(255,255,255,0.5);
+        }
+        .mini-btn:hover { background: var(--primary); border-color: var(--primary); }
+
+        #edit-section { display: none; width: 100%; flex-direction: column; gap: 20px; }
+        .scroll-row { display: flex; align-items: center; width: 100%; gap: 5px; }
+        .nav-btn {
+            background: #fff; border: 1px solid #e0e0e0; width: 32px; height: 32px;
+            border-radius: 50%; display: flex; justify-content: center; align-items: center;
+            cursor: pointer; color: var(--text-light); flex-shrink: 0; transition: 0.2s; box-shadow: 0 2px 5px rgba(0,0,0,0.05);
+        }
+        .nav-btn:hover { background: var(--primary-light); color: var(--primary-dark); }
+        .scroll-wrapper {
+            flex: 1; overflow-x: auto; display: flex; gap: 10px; padding: 4px 2px;
+            scrollbar-width: none; -ms-overflow-style: none; scroll-behavior: smooth;
+        }
+        .scroll-wrapper::-webkit-scrollbar { display: none; }
+        .section-label { font-size: 0.9rem; color: var(--primary-dark); font-weight: bold; margin-bottom: 8px; margin-left: 5px; display: flex; justify-content: space-between; align-items: center;}
+
+        .toggle-switch { display: flex; align-items: center; gap: 8px; font-size: 0.8rem; cursor: pointer; color: var(--text-main); font-weight: bold; line-height: 1; }
+        .toggle-input { display: none; }
+        .toggle-slider { width: 40px; height: 22px; background: #cbd5e1; border-radius: 24px; position: relative; transition: 0.3s; flex-shrink: 0; }
+        .toggle-slider::before {
+            content: ''; position: absolute; left: 3px; top: 3px; width: 16px; height: 16px;
+            background: white; border-radius: 50%; transition: 0.3s; box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+        }
+        .toggle-input:checked + .toggle-slider { background: var(--primary); }
+        .toggle-input:checked + .toggle-slider::before { transform: translateX(18px); }
+
+        .theme-circle {
+            width: 50px; height: 50px; border-radius: 12px; flex-shrink: 0; cursor: pointer;
+            border: 3px solid #fff; box-shadow: 0 2px 6px rgba(0,0,0,0.1); transition: 0.2s;
+            position: relative; overflow: hidden; background-size: cover; background-position: center;
+        }
+        .theme-circle.active { transform: scale(1.1); border-color: var(--primary); }
+
+        .filter-chip {
+            padding: 8px 18px; background: #fff; border-radius: 10px;
+            font-size: 0.85rem; color: var(--text-light); cursor: pointer; white-space: nowrap; flex-shrink: 0;
+            border: 1px solid #e0e0e0; transition: 0.2s;
+        }
+        .filter-chip.active { background: var(--primary); color: white; border-color: var(--primary); box-shadow: 0 4px 10px var(--btn-shadow); }
+
+        .sticker { font-size: 28px; cursor: pointer; padding: 0 5px; transition: 0.2s; user-select: none; }
+        .sticker:hover { transform: scale(1.2); }
+        .sticker-img {
+            height: 45px; width: auto; cursor: pointer; padding: 2px; transition: 0.2s;
+            vertical-align: middle; background: transparent;
+        }
+        .sticker-img:hover { transform: scale(1.15); filter: drop-shadow(0 2px 5px rgba(0,0,0,0.1)); }
+
+        .toolbar-column { display: flex; flex-direction: column; gap: 10px; width: 100%; background: #f0ebe0; padding: 15px; border-radius: 16px; border: 1px solid #fff; }
+        .toolbar-row { display: flex; justify-content: center; align-items: center; gap: 8px; width: 100%; flex-wrap: wrap; }
+        .icon-btn {
+            width: 38px; height: 38px; border-radius: 10px; border: 1px solid #e0e0e0; background: #fff;
+            color: var(--text-light); display: grid; place-items: center; cursor: pointer; transition: 0.2s; flex-shrink: 0;
+        }
+        .icon-btn.active { background: var(--primary); color: white; border-color: var(--primary); }
+        
+        .text-input { 
+            border: 1px solid #e0e0e0; border-radius: 8px; padding: 8px 12px; flex: 1; min-width: 120px; 
+            outline: none; font-family: inherit; font-size: 0.9rem; background: #fff; color: var(--text-main);
+        }
+        .text-input:focus { border-color: var(--primary); }
+        
+        .select-input { border: 1px solid #e0e0e0; border-radius: 8px; padding: 6px; font-size: 0.85rem; outline: none; background: #fff; cursor: pointer; color: var(--text-main); flex: 1; }
+        
+        .border-settings { display: flex; justify-content: space-evenly; align-items: center; width: 100%; background: #fff; border: 1px solid #e0e0e0; padding: 12px 10px; border-radius: 12px; margin-bottom: 5px; }
+
+        .text-stroke-settings { display: flex; justify-content: space-between; align-items: center; width: 100%; margin-top: 5px; padding: 8px 5px; border-top: 1px solid rgba(0,0,0,0.05); background: transparent; height: 48px; }
+        .ts-group { display: flex; align-items: center; gap: 10px; }
+
+        .setting-item { display: flex; align-items: center; gap: 8px; font-size: 0.8rem; color: var(--text-light); font-weight: bold; }
+        input[type="range"] { accent-color: var(--primary); width: 70px; cursor: pointer; vertical-align: middle; }
+        input[type="color"] { width: 32px; height: 32px; border: 2px solid #fff; border-radius: 50%; background: none; cursor: pointer; padding: 0; overflow: hidden; vertical-align: middle; box-shadow: 0 1px 3px rgba(0,0,0,0.1);}
+        
+        #canvas-scale-container { 
+            position: sticky; top: -5px; z-index: 50; 
+            width: calc(100% + 48px); margin-left: -24px; margin-right: -24px; /* 延伸至卡片邊緣 */
+            display: flex; justify-content: center; 
+            padding: 10px 0; background: var(--card-bg);
+            border-bottom: 2px dashed rgba(102, 166, 255, 0.2);
+            box-shadow: 0 10px 15px -10px rgba(0,0,0,0.05);
+        }
+        #canvas-wrapper { box-shadow: 0 10px 30px rgba(64, 50, 40, 0.1); border: 4px solid #fff; transform-origin: top center; background-color: #fff; }
+
+        footer { margin-top: 30px; font-size: 0.8rem; color: var(--text-light); font-weight: 500; text-align: center; }
+        .hidden { display: none !important; }
+        .fade-in { animation: fadeIn 0.6s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(15px); } to { opacity: 1; transform: translateY(0); } }
+    </style>
+</head>
+<body>
+
+    <input type="file" id="img-upload" hidden accept="image/*">
+    <div id="floating-background"></div>
+
+    <div class="app-shell">
+        <h1><img src="logo/sxhslogo.svg" style="height: 1.2em; width: auto; flex-shrink: 0;"> 新北市立雙溪高級中學拍貼機系統</h1>
+
+        <!-- 1. 拍攝介面 -->
+        <div id="camera-section" class="control-group fade-in">
+            <div class="viewport-container">
+                <video id="video" autoplay playsinline></video>
+                <canvas id="particle-canvas"></canvas>
+                <div id="countdown-overlay">3</div>
+                <div id="gesture-hint"><i class="fa-solid fa-spinner fa-spin"></i> AI模型載入中...</div>
+            </div>
+
+            <div class="mode-tabs">
+                <button class="mode-tab active" id="tab-auto" onclick="setMode('auto')">自動連拍</button>
+                <button class="mode-tab" id="tab-gesture" onclick="setMode('gesture')">體感模式</button>
+                <button class="mode-tab" id="tab-manual" onclick="setMode('manual')">手動模式</button>
+            </div>
+
+            <div id="status-display"><i class="fa-solid fa-camera"></i> 準備好你的自然笑容！</div>
+
+            <button id="btn-snap" class="btn-main"><i class="fa-solid fa-play"></i> 開始拍攝</button>
+            <div class="preview-row" id="preview-camera"></div>
+        </div>
+
+        <!-- 2. 編輯介面 -->
+        <div id="edit-section" class="fade-in">
+            <!-- 畫布 (固定在頂部方便預覽) -->
+            <div id="canvas-scale-container">
+                <div id="canvas-wrapper"><canvas id="c"></canvas></div>
+            </div>
+
+            <div style="width: 100%;">
+                <div class="section-label">調整照片 (點擊選取可交換位置)</div>
+                <div class="preview-row" id="preview-edit"></div>
+            </div>
+
+            <!-- 風格 (含自訂圖片) -->
+            <div style="width: 100%;">
+                <div class="section-label">背景風格</div>
+                <div class="scroll-row">
+                    <button class="nav-btn" onclick="scrollContainer('theme-wrapper', -1)"><i class="fa-solid fa-chevron-left"></i></button>
+                    <div class="scroll-wrapper" id="theme-wrapper"></div>
+                    <button class="nav-btn" onclick="scrollContainer('theme-wrapper', 1)"><i class="fa-solid fa-chevron-right"></i></button>
+                </div>
+            </div>
+            
+            <!-- 相框 -->
+            <div style="width: 100%;">
+                <div class="section-label">
+                    <span>相框設定</span>
+                    <label class="toggle-switch">
+                        <input type="checkbox" class="toggle-input" id="toggle-border" onchange="render()" checked>
+                        <span class="toggle-slider"></span> 顯示邊框
+                    </label>
+                </div>
+                <div class="border-settings">
+                    <div class="setting-item"><i class="fa-solid fa-arrows-left-right-to-line"></i> <input type="range" id="border-width" min="1" max="40" value="15" oninput="render()"></div>
+                    <div class="setting-item"><i class="fa-regular fa-square"></i> <input type="range" id="border-radius" min="0" max="60" value="0" oninput="render()"></div>
+                    <div class="setting-item"><i class="fa-solid fa-palette"></i> <input type="color" id="border-color" value="#ffffff" oninput="render()"></div>
+                </div>
+            </div>
+
+            <!-- 文字工具 -->
+            <div style="width: 100%;">
+                <div class="section-label">文字與工具</div>
+                <div class="toolbar-column">
+                    <div class="toolbar-row">
+                        <input type="text" id="custom-text" class="text-input" placeholder="輸入文字">
+                        <select id="font-family" class="select-input" onchange="render()">
+                            <option value="'Zen Maru Gothic', sans-serif" selected>日系圓體</option>
+                            <option value="'Noto Serif TC', serif">優雅襯線</option>
+                            <option value="'Itim', cursive">可愛手寫</option>
+                        </select>
+                        <input type="color" id="text-color" value="#3B7AD4" oninput="render()">
+                    </div>
+                    <div class="text-stroke-settings">
+                        <div class="ts-group">
+                            <label class="toggle-switch">
+                                <input type="checkbox" class="toggle-input" id="text-stroke-toggle" onchange="render()" checked>
+                                <span class="toggle-slider"></span> 文字描邊
+                            </label>
+                        </div>
+                        <div class="ts-group">
+                            <div class="setting-item"><i class="fa-solid fa-pen-nib"></i> <input type="range" id="text-stroke-width" min="1" max="15" value="4" oninput="render()" style="width: 60px;"></div>
+                            <div class="setting-item"><input type="color" id="text-stroke-color" value="#ffffff" oninput="render()" style="width: 28px; height: 28px;"></div>
+                        </div>
+                    </div>
+                    <div style="width:100%; height:1px; background:#e0e0e0; margin-top: 5px;"></div>
+                    <div class="toolbar-row">
+                        <button class="icon-btn active" id="btn-select" onclick="setTool('select')"><i class="fa-solid fa-arrow-pointer"></i></button>
+                        <button class="icon-btn" id="btn-draw" onclick="setTool('draw')"><i class="fa-solid fa-paintbrush"></i></button>
+                        <input type="color" id="pen-color" value="#66A6FF" onchange="updateBrush()">
+                        <button class="icon-btn" onclick="undoLastStroke()"><i class="fa-solid fa-rotate-left"></i></button>
+                        <button class="icon-btn" onclick="deleteSelected()"><i class="fa-solid fa-trash-can"></i></button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 濾鏡 -->
+            <div style="width: 100%;">
+                <div class="section-label">濾鏡特效</div>
+                <div class="scroll-row">
+                    <button class="nav-btn" onclick="scrollContainer('filter-wrapper', -1)"><i class="fa-solid fa-chevron-left"></i></button>
+                    <div class="scroll-wrapper" id="filter-wrapper">
+                        <div class="filter-chip active" onclick="setFilter('none', this)">原圖</div>
+                        <div class="filter-chip" onclick="setFilter('sepia(0.3) contrast(0.9) brightness(1.1)', this)">日系空氣感</div>
+                        <div class="filter-chip" onclick="setFilter('sepia(0.4) saturate(0.8)', this)">復古暖陽</div>
+                        <div class="filter-chip" onclick="setFilter('contrast(0.9) brightness(1.1) saturate(0.8)', this)">莫蘭迪</div>
+                        <div class="filter-chip" onclick="setFilter('brightness(1.1) contrast(1.1)', this)">清晰明亮</div>
+                        <div class="filter-chip" onclick="setFilter('grayscale(100%) contrast(1.1) brightness(1.1)', this)">黑白底片</div>
+                        <div class="filter-chip" onclick="setFilter('hue-rotate(-10deg) sepia(0.2)', this)">森林冷調</div>
+                        <div class="filter-chip" onclick="setFilter('saturate(1.4) contrast(1.1)', this)">鮮豔</div>
+                        <div class="filter-chip" onclick="setFilter('contrast(1.2) sepia(0.5)', this)">懷舊電影</div>
+                        <div class="filter-chip" onclick="setFilter('opacity(0.9) brightness(1.2)', this)">柔焦</div>
+                    </div>
+                    <button class="nav-btn" onclick="scrollContainer('filter-wrapper', 1)"><i class="fa-solid fa-chevron-right"></i></button>
+                </div>
+            </div>
+
+            <!-- 貼圖 -->
+            <div style="width: 100%;">
+                <div class="section-label">裝飾貼圖</div>
+                <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; justify-content: center; width: 100%;">
+                    <div class="filter-chip active" id="st-tab-cat1" onclick="setStickerTab('cat1')">快樂日常</div>
+                    <div class="filter-chip" id="st-tab-cat2" onclick="setStickerTab('cat2')">好祥一起</div>
+                    <div class="filter-chip" id="st-tab-cat3" onclick="setStickerTab('cat3')">祥祥多才</div>
+                </div>
+                <div class="scroll-row">
+                    <button class="nav-btn" onclick="scrollContainer('sticker-wrapper', -1)"><i class="fa-solid fa-chevron-left"></i></button>
+                    <div class="scroll-wrapper" id="sticker-wrapper">
+                        <!-- 圖片貼圖 sticker001 ~ sticker120 -->
+                        <script>
+                            document.addEventListener('DOMContentLoaded', function() {
+                                const wrapper = document.getElementById('sticker-wrapper');
+                                for(let i=1; i<=120; i++) {
+                                    let cat = i <= 40 ? 'cat1' : (i <= 80 ? 'cat2' : 'cat3');
+                                    let numStr = i.toString().padStart(3, '0');
+                                    let srcPath = 'sticker/sticker' + numStr + '.png';
+                                    let img = document.createElement('img');
+                                    img.src = srcPath;
+                                    img.className = 'sticker-img';
+                                    img.setAttribute('data-category', cat);
+                                    img.setAttribute('loading', 'lazy');
+                                    if (window.location.protocol !== 'file:') {
+                                        img.crossOrigin = "anonymous";
+                                    }
+                                    img.onclick = function() { addImageSticker(srcPath); };
+                                    img.onerror = function() { this.style.display='none'; };
+                                    if(cat !== 'cat1') img.style.display = 'none';
+                                    
+                                    wrapper.appendChild(img);
+                                }
+                            });
+
+                            window.setStickerTab = function(cat) {
+                                document.querySelectorAll('[id^="st-tab-"]').forEach(t => t.classList.remove('active'));
+                                document.getElementById('st-tab-' + cat).classList.add('active');
+                                
+                                const wrapper = document.getElementById('sticker-wrapper');
+                                wrapper.querySelectorAll('.sticker-img').forEach(el => {
+                                    if (el.getAttribute('data-category') === cat) {
+                                        el.style.display = '';
+                                    } else {
+                                        el.style.display = 'none';
+                                    }
+                                });
+                                wrapper.scrollLeft = 0;
+                            };
+                        </script>
+                    </div>
+                    <button class="nav-btn" onclick="scrollContainer('sticker-wrapper', 1)"><i class="fa-solid fa-chevron-right"></i></button>
+                </div>
+            </div>
+
+
+
+            <!-- 按鈕 -->
+            <div style="display: flex; gap: 10px; width: 100%;">
+                <button onclick="fullReset()" class="btn-main btn-secondary" style="flex: 1;"><i class="fa-solid fa-rotate-right"></i> 重拍</button>
+                <button onclick="downloadImage()" class="btn-main" style="flex: 2;"><i class="fa-solid fa-download"></i> 下載</button>
+            </div>
+        </div>
+    </div>
+
+    <footer>Copyright © Liyuchiutiger Gongminshen</footer>
+    <div class="mascot-container">
+        <img src="image/LiyuChillGuy.svg" alt="ChillGuy" class="mascot-img" onerror="this.style.display='none'">
+    </div>
+
+    <script>
+        // 自然色系粒子
+        const particleColors = ['#609966', '#9DC08B', '#EDF1D6', '#40513B', '#E2C799', '#D89259'];
+        
+        let floatZones = [0, 1, 2, 3, 4, 5];
+        let shuffledZones = [];
+        
+        function getNextZone() {
+            if (shuffledZones.length === 0) {
+                shuffledZones = [...floatZones].sort(() => Math.random() - 0.5);
+            }
+            return shuffledZones.pop();
+        }
+
+        function initFloatingBackground() {
+            const container = document.getElementById('floating-background');
+
+            function createExplosion(x, y, parentContainer) {
+                const explosionColors = ['#FF595E', '#FFCA3A', '#8AC926', '#1982C4', '#6A4C93', '#FF9F1C'];
+                for (let i = 0; i < 20; i++) {
+                    let p = document.createElement('div');
+                    p.style.position = 'absolute';
+                    p.style.left = x + 'px';
+                    p.style.top = y + 'px';
+                    p.style.width = '14px';
+                    p.style.height = '14px';
+                    p.style.borderRadius = '50%';
+                    p.style.backgroundColor = explosionColors[Math.floor(Math.random() * explosionColors.length)];
+                    p.style.pointerEvents = 'none';
+                    
+                    const angle = Math.random() * Math.PI * 2;
+                    const velocity = Math.random() * 120 + 60;
+                    const vx = Math.cos(angle) * velocity;
+                    const vy = Math.sin(angle) * velocity;
+                    
+                    p.animate([
+                        { transform: 'translate(-50%, -50%) scale(1)', opacity: 1 },
+                        { transform: `translate(calc(-50% + ${vx}px), calc(-50% + ${vy}px)) scale(0)`, opacity: 0 }
+                    ], {
+                        duration: 600 + Math.random() * 400,
+                        easing: 'cubic-bezier(0.25, 1, 0.5, 1)'
+                    }).onfinish = () => p.remove();
+                    
+                    parentContainer.appendChild(p);
+                }
+            }
+
+            function createFloatingElement(isInitial = false, index = 0) {
+                let wrapper = document.createElement('div');
+                wrapper.className = 'floating-icon-wrapper';
+
+                let el = document.createElement('img');
+                const randomNum = Math.floor(Math.random() * 120) + 1;
+                const numStr = randomNum.toString().padStart(3, '0');
+                el.src = `sticker/sticker${numStr}.png`;
+                el.className = 'floating-icon';
+                
+                // 圖案維持較大尺寸，但縮小範圍上限以防過度擁擠
+                const imgSize = Math.random() * 60 + 110; // 110px ~ 170px
+                el.style.width = `${imgSize}px`;
+                el.style.height = 'auto';
+
+                // 使用 5 個分區確保夠寬的水平間隔
+                const zone = getNextZone();
+                const zoneWidth = 100 / floatZones.length;
+                // 減少隨機偏移的範圍，讓圖案更穩定地待在自己的軌道內
+                const left = (zone * zoneWidth) + (Math.random() * (zoneWidth * 0.4)) + (zoneWidth * 0.3); 
+                
+                // 放慢上升速度，因為圖片變大，慢一點比較有優雅的漂浮感
+                const duration = Math.random() * 15 + 25; // 25s ~ 40s
+                
+                wrapper.style.left = `${left}%`;
+                wrapper.style.animationDuration = `${duration}s`;
+
+                if (isInitial) {
+                    // 初始化時，利用索引值算出精確的均勻高度（負延遲）
+                    // 確保剛載入時的 5 張圖完美地散佈在不同高低位置
+                    const step = duration / floatZones.length;
+                    const delay = -(index * step);
+                    wrapper.style.animationDelay = `${delay}s`;
+                }
+
+                let clickCount = 0;
+
+                // 互動邏輯：滑鼠滑過時會有「撥開」的效果，並保留當前的縮放狀態
+                el.addEventListener('mouseenter', () => {
+                    const pushX = (Math.random() - 0.5) * 150;
+                    const pushY = (Math.random() - 0.5) * 100 - 50;
+                    const rotate = (Math.random() - 0.5) * 120;
+                    const baseScale = 1 + clickCount * 0.4;
+                    el.style.transform = `translate(${pushX}px, ${pushY}px) scale(${baseScale + 0.15}) rotate(${rotate}deg)`;
+                    
+                    // 短暫停留後恢復
+                    setTimeout(() => {
+                        el.style.transform = `scale(${baseScale})`;
+                    }, 800);
+                });
+
+                // 互動邏輯：點擊圖案會變大，達 3 次即爆炸噴出彩色粒子
+                el.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    clickCount++;
+                    
+                    if (clickCount >= 3) {
+                        // 取得當前圖片的位置
+                        const rect = el.getBoundingClientRect();
+                        const cx = rect.left + rect.width / 2;
+                        const cy = rect.top + rect.height / 2;
+                        
+                        el.style.display = 'none'; // 隱藏圖片
+                        createExplosion(cx, cy, container); // 產生爆炸粒子
+                        
+                        setTimeout(() => wrapper.remove(), 1000);
+                    } else {
+                        // 變大效果
+                        const newScale = 1 + clickCount * 0.4;
+                        el.style.transform = `scale(${newScale})`;
+                    }
+                });
+
+                wrapper.appendChild(el);
+                container.appendChild(wrapper);
+                
+                // 動畫結束後自動移除
+                wrapper.addEventListener('animationend', () => wrapper.remove());
+            }
+
+            // 縮短間隔時間至 1.8 秒，增加背景圖案的豐富度
+            setInterval(() => createFloatingElement(false), 1800);
+            
+            // 預先產生初始元素，帶入索引值作為高度計算依據
+            for(let i=0; i<floatZones.length; i++) {
+                createFloatingElement(true, i);
+            }
+        }
+        window.addEventListener('load', initFloatingBackground);
+
+        const video = document.getElementById('video');
+        const btnSnap = document.getElementById('btn-snap');
+        const statusDisplay = document.getElementById('status-display');
+        const countdownOverlay = document.getElementById('countdown-overlay');
+        const gestureHint = document.getElementById('gesture-hint');
+        const imgUploadInput = document.getElementById('img-upload');
+        const particleCanvas = document.getElementById('particle-canvas');
+        
+        let shots = [null, null, null, null]; 
+        const maxShots = 4;
+        let mode = 'auto'; 
+        let isBusy = false;
+        let isEditing = false; 
+        let swapSourceIndex = -1;
+        
+        let fabricCanvas;
+        let currentFilter = 'none';
+        let hands;
+        let isModelLoaded = false;
+        let detectionLoopId = null;
+        let particles = [];
+        let pCtx = particleCanvas.getContext('2d');
+
+        // === 主題庫 (自然鄉村風格 + 自訂圖片 1-15) ===
+        const themes = {
+            // 自訂相框 1~15
+            custom_01: { name: '自訂相框 1', bg: '#ffffff', primary: '#609966', text: '#40513B', style: 'image', src: 'bg-frame/bg-frame-01.png' },
+            custom_02: { name: '自訂相框 2', bg: '#ffffff', primary: '#609966', text: '#40513B', style: 'image', src: 'bg-frame/bg-frame-02.png' },
+            custom_03: { name: '自訂相框 3', bg: '#ffffff', primary: '#609966', text: '#40513B', style: 'image', src: 'bg-frame/bg-frame-03.png' },
+            custom_04: { name: '自訂相框 4', bg: '#ffffff', primary: '#609966', text: '#40513B', style: 'image', src: 'bg-frame/bg-frame-04.png' },
+            custom_05: { name: '自訂相框 5', bg: '#ffffff', primary: '#609966', text: '#40513B', style: 'image', src: 'bg-frame/bg-frame-05.png' },
+            custom_06: { name: '自訂相框 6', bg: '#ffffff', primary: '#609966', text: '#40513B', style: 'image', src: 'bg-frame/bg-frame-06.png' },
+            custom_07: { name: '自訂相框 7', bg: '#ffffff', primary: '#609966', text: '#40513B', style: 'image', src: 'bg-frame/bg-frame-07.png' },
+            custom_08: { name: '自訂相框 8', bg: '#ffffff', primary: '#609966', text: '#40513B', style: 'image', src: 'bg-frame/bg-frame-08.png' },
+            custom_09: { name: '自訂相框 9', bg: '#ffffff', primary: '#609966', text: '#40513B', style: 'image', src: 'bg-frame/bg-frame-09.png' },
+            custom_10: { name: '自訂相框 10', bg: '#ffffff', primary: '#609966', text: '#40513B', style: 'image', src: 'bg-frame/bg-frame-10.png' },
+            custom_11: { name: '自訂相框 11', bg: '#ffffff', primary: '#609966', text: '#40513B', style: 'image', src: 'bg-frame/bg-frame-11.png' },
+            custom_12: { name: '自訂相框 12', bg: '#ffffff', primary: '#609966', text: '#40513B', style: 'image', src: 'bg-frame/bg-frame-12.png' },
+            custom_13: { name: '自訂相框 13', bg: '#ffffff', primary: '#609966', text: '#40513B', style: 'image', src: 'bg-frame/bg-frame-13.png' },
+            custom_14: { name: '自訂相框 14', bg: '#ffffff', primary: '#609966', text: '#40513B', style: 'image', src: 'bg-frame/bg-frame-14.png' },
+            custom_15: { name: '自訂相框 15', bg: '#ffffff', primary: '#609966', text: '#40513B', style: 'image', src: 'bg-frame/bg-frame-15.png' },
+
+            // 自然風格內建主題
+            green_check: { name: '野餐綠格', bg: '#EDF1D6', primary: '#609966', text: '#40513B', style: 'check', patternColor: '#9DC08B' },
+            beige_dots: { name: '燕麥波點', bg: '#F2E9E4', primary: '#9A8C98', text: '#4A4E69', style: 'dots', patternColor: '#C9ADA7' },
+            kraft_paper: { name: '牛皮紙感', bg: '#E6CCB2', primary: '#7F5539', text: '#5D4037', style: 'noise', patternColor: '#DDB892' },
+            sky_blue: { name: '晴空雲朵', bg: '#E0F7FA', primary: '#4DD0E1', text: '#006064', style: 'clouds', patternColor: '#B2EBF2' },
+            linen_plain: { name: '純淨亞麻', bg: '#FAF9F6', primary: '#8D8D8D', text: '#333333', style: 'linen', patternColor: '#EAEAEA' },
+            lemon_yellow: { name: '檸檬黃', bg: '#FEFAE0', primary: '#D4A373', text: '#BC6C25', style: 'check', patternColor: '#FAEDCD' },
+            
+            forest_leaves: { name: '森林落葉', bg: '#3e5641', primary: '#a24936', text: '#f3e9d2', style: 'leaves', patternColor: '#283618' },
+            
+            warm_plaid: { name: '暖暖格紋', bg: '#FAD2E1', primary: '#C59FC9', text: '#7251B5', style: 'plaid', patternColor: '#E2A0A3' },
+            retro_flower: { name: '復古小花', bg: '#FFF1E6', primary: '#F4978E', text: '#E56B6F', style: 'flowers', patternColor: '#F08080' },
+            
+            terrazzo_nature: { name: '大地水磨石', bg: '#EBEBEB', primary: '#7D7D7D', text: '#424242', style: 'terrazzo', patternColor: 'earth' },
+            
+            mint_fresh: { name: '薄荷清新', bg: '#E8F5E9', primary: '#66BB6A', text: '#1B5E20', style: 'stripes', patternColor: '#C8E6C9' },
+            coffee_time: { name: '午後咖啡', bg: '#6F4E37', primary: '#D2B48C', text: '#FFF8E7', style: 'dots', patternColor: '#8D6E63' },
+            
+            lavender: { name: '薰衣草田', bg: '#F3E5F5', primary: '#AB47BC', text: '#6A1B9A', style: 'grid', patternColor: '#E1BEE7' },
+            wood_grain: { name: '原木質感', bg: '#D7CCC8', primary: '#795548', text: '#3E2723', style: 'wood', patternColor: '#A1887F' },
+            
+            white_simple: { name: '極簡白', bg: '#ffffff', primary: '#999999', text: '#000000', style: 'solid', patternColor: 'transparent' }
+        };
+        let currentTheme = 'custom_01'; // 預設使用第一個自訂相框
+
+        function initPreviewRows() {
+            const rowCamera = document.getElementById('preview-camera');
+            const rowEdit = document.getElementById('preview-edit');
+            rowCamera.innerHTML = ''; rowEdit.innerHTML = '';
+            for(let i=0; i<maxShots; i++) {
+                const divCam = document.createElement('div');
+                divCam.className = 'preview-item'; divCam.id = `cam-item-${i}`;
+                divCam.innerHTML = `<i class="fa-regular fa-image"></i>`;
+                rowCamera.appendChild(divCam);
+                const divEdit = document.createElement('div');
+                divEdit.className = 'preview-item'; divEdit.id = `edit-item-${i}`;
+                divEdit.onclick = (e) => handleImageClick(i, e);
+                divEdit.innerHTML = `<i class="fa-regular fa-image"></i><div class="preview-overlay"><button class="mini-btn btn-upload" onclick="event.stopPropagation(); triggerUpload(${i})"><i class="fa-solid fa-upload"></i> 上傳</button></div>`;
+                rowEdit.appendChild(divEdit);
+            }
+        }
+        initPreviewRows();
+
+        function handleImageClick(index, event) {
+            if (!shots[index] && swapSourceIndex === -1) return;
+            if (swapSourceIndex === -1) {
+                swapSourceIndex = index;
+                document.getElementById(`edit-item-${index}`).classList.add('selected');
+            } else if (swapSourceIndex === index) {
+                document.getElementById(`edit-item-${index}`).classList.remove('selected');
+                swapSourceIndex = -1;
+            } else {
+                const temp = shots[index]; shots[index] = shots[swapSourceIndex]; shots[swapSourceIndex] = temp;
+                updateShotUI(index); updateShotUI(swapSourceIndex);
+                document.querySelectorAll('.preview-item').forEach(el => el.classList.remove('selected'));
+                swapSourceIndex = -1; render();
+            }
+        }
+
+        let uploadTargetIndex = -1;
+        imgUploadInput.addEventListener('change', function(e) {
+            if (this.files && this.files[0] && uploadTargetIndex !== -1) {
+                const reader = new FileReader();
+                reader.onload = function(evt) {
+                    updateShot(uploadTargetIndex, evt.target.result);
+                    if(isEditing) render();
+                    imgUploadInput.value = '';
+                };
+                reader.readAsDataURL(this.files[0]);
+            }
+        });
+
+        window.triggerUpload = (index) => { uploadTargetIndex = index; imgUploadInput.click(); };
+        function updateShot(index, dataUrl) { shots[index] = dataUrl; updateShotUI(index); }
+        function updateShotUI(index) {
+            const dataUrl = shots[index];
+            const updateItem = (prefix) => {
+                const item = document.getElementById(`${prefix}-item-${index}`);
+                if(item) {
+                    if (dataUrl) { item.style.backgroundImage = `url(${dataUrl})`; item.classList.add('has-img'); const icon = item.querySelector('.fa-image'); if(icon) icon.style.display = 'none'; } 
+                    else { item.style.backgroundImage = ''; item.classList.remove('has-img'); const icon = item.querySelector('.fa-image'); if(icon) icon.style.display = 'block'; }
+                }
+            };
+            updateItem('cam'); updateItem('edit');
+        }
+
+        async function initCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" } });
+                video.srcObject = stream; await new Promise(resolve => video.onloadedmetadata = resolve); video.play();
+                particleCanvas.width = video.videoWidth; particleCanvas.height = video.videoHeight;
+                animateParticles(); 
+                hands = new Hands({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`});
+                hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+                hands.onResults(onHandResults);
+                startDetectionLoop();
+            } catch (err) { console.error(err); statusDisplay.innerHTML = `<span style="color:red">無法開啟相機</span>`; }
+        }
+        initCamera();
+
+        function createParticles() {
+            const cx = particleCanvas.width / 2, cy = particleCanvas.height / 2;
+            for(let i=0; i<30; i++) particles.push({ x: cx, y: cy, vx: (Math.random()-0.5)*20, vy: (Math.random()-0.5)*20, life: 1.0, color: particleColors[Math.floor(Math.random()*particleColors.length)] });
+        }
+        function animateParticles() {
+            pCtx.clearRect(0, 0, particleCanvas.width, particleCanvas.height);
+            for(let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i]; p.x += p.vx; p.y += p.vy; p.life -= 0.02; p.vy += 0.5;
+                if(p.life <= 0) particles.splice(i, 1);
+                else { pCtx.beginPath(); pCtx.arc(p.x, p.y, 4*p.life, 0, Math.PI*2); pCtx.globalAlpha = p.life; pCtx.fillStyle = p.color; pCtx.fill(); pCtx.globalAlpha = 1; }
+            }
+            requestAnimationFrame(animateParticles);
+        }
+
+        function startDetectionLoop() {
+            async function loop() {
+                if (mode === 'gesture' && !isBusy && video.readyState >= 2 && !isEditing) await hands.send({image: video});
+                detectionLoopId = requestAnimationFrame(loop);
+            }
+            loop();
+        }
+
+        function onHandResults(results) {
+            if(!isModelLoaded) { isModelLoaded = true; if(mode === 'gesture') updateGestureHintUI(true); }
+            if(isBusy || isEditing) return;
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const lm = results.multiHandLandmarks[0];
+                if (lm[8].y < lm[6].y && lm[12].y < lm[10].y && lm[16].y < lm[14].y && lm[20].y < lm[18].y) {
+                    const nextIndex = shots.findIndex(s => s === null);
+                    if (nextIndex !== -1) triggerGestureSnap(nextIndex); else if (!isEditing) finish(); 
+                }
+            }
+        }
+
+        function updateGestureHintUI(ready) {
+            gestureHint.innerHTML = ready ? '<i class="fa-regular fa-hand-paper pulse"></i> 比「布」自動拍' : '<i class="fa-solid fa-spinner fa-spin"></i> 載入中...';
+            gestureHint.style.background = ready ? "rgba(96, 153, 102, 0.9)" : "rgba(100,100,100,0.6)";
+        }
+
+        function triggerGestureSnap(index) {
+            isBusy = true; createParticles(); statusDisplay.innerHTML = '<i class="fa-solid fa-hand-sparkles"></i> 偵測到手勢！';
+            gestureHint.style.background = "#D89259"; gestureHint.innerHTML = 'OK!';
+            setTimeout(() => { updateGestureHintUI(true); takeShotWithCountdown(index); }, 600);
+        }
+
+        window.setMode = (m) => {
+            if(isBusy) return; mode = m;
+            document.querySelectorAll('.mode-tab').forEach(b => b.classList.remove('active'));
+            document.getElementById(`tab-${m}`).classList.add('active');
+            gestureHint.style.display = 'none'; btnSnap.disabled = false; btnSnap.style.display = 'flex';
+            if(m === 'auto') { btnSnap.innerHTML = '<i class="fa-solid fa-play"></i> 開始自動連拍'; statusDisplay.innerHTML = '自動倒數 3 秒連拍'; }
+            else if (m === 'gesture') { btnSnap.innerHTML = '<i class="fa-solid fa-hand"></i> 體感模式待機中'; statusDisplay.innerHTML = '請比「布 ✋」'; gestureHint.style.display = 'flex'; updateGestureHintUI(isModelLoaded); btnSnap.disabled = true; }
+            else { btnSnap.innerHTML = '<i class="fa-solid fa-camera"></i> 立即拍照'; statusDisplay.innerHTML = '手動控制快門'; }
+        };
+
+        btnSnap.onclick = () => {
+            if(isBusy) return;
+            const nextIndex = shots.findIndex(s => s === null);
+            if(nextIndex === -1) { finish(); return; }
+            if(mode === 'auto') { btnSnap.style.display = 'none'; runAutoSequence(nextIndex); } 
+            else if (mode === 'manual') { takeManualShot(nextIndex); }
+        };
+
+        function runAutoSequence(startIndex) {
+            if(startIndex >= maxShots) { finish(); return; }
+            statusDisplay.innerText = `準備拍攝第 ${startIndex + 1} 張...`; isBusy = true;
+            setTimeout(() => {
+                runCountdown(3, () => {
+                    snap(startIndex); isBusy = false;
+                    if(startIndex + 1 < maxShots) { statusDisplay.innerText = "稍等一下..."; setTimeout(() => runAutoSequence(startIndex+1), 1500); } 
+                    else { setTimeout(finish, 800); }
+                });
+            }, 1000);
+        }
+
+        function takeManualShot(index) {
+            isBusy = true; snap(index); setTimeout(() => { isBusy = false; }, 500);
+            if(shots.filter(s => s !== null).length === maxShots) { btnSnap.innerHTML = '<i class="fa-solid fa-check"></i> 完成拍攝'; setTimeout(finish, 800); } 
+            else { const next = index + 2; if(next <= 4) btnSnap.innerHTML = `<i class="fa-solid fa-camera"></i> 拍下一張 (${next-1}/4)`; }
+        }
+
+        function takeShotWithCountdown(index) {
+            runCountdown(3, () => {
+                snap(index);
+                setTimeout(() => { 
+                    if(shots.filter(s=>s!==null).length < maxShots) { statusDisplay.innerHTML = `已拍 ${index+1}/4，請比「布 ✋」`; isBusy = false; } else finish();
+                }, 2500);
+            });
+        }
+
+        function runCountdown(sec, callback) {
+            countdownOverlay.style.display = 'flex'; countdownOverlay.innerText = sec;
+            let timer = setInterval(() => {
+                sec--; if(sec>0) countdownOverlay.innerText = sec;
+                else { clearInterval(timer); countdownOverlay.style.display = 'none'; callback(); }
+            }, 1000);
+        }
+
+        function snap(index) {
+            const f = document.createElement('div'); f.style.cssText = 'position:fixed;inset:0;background:white;z-index:999;pointer-events:none;'; document.body.appendChild(f);
+            f.animate([{opacity:1}, {opacity:0}], {duration:200}).onfinish = () => f.remove();
+            const c = document.createElement('canvas'); const targetW = 800, targetH = 600; c.width = targetW; c.height = targetH;
+            const ctx = c.getContext('2d'); ctx.translate(c.width, 0); ctx.scale(-1, 1);
+            const vw = video.videoWidth, vh = video.videoHeight; const targetRatio = targetW / targetH; const videoRatio = vw / vh;
+            let sx, sy, sw, sh;
+            if (videoRatio > targetRatio) { sh = vh; sw = sh * targetRatio; sy = 0; sx = (vw - sw) / 2; } 
+            else { sw = vw; sh = sw / targetRatio; sx = 0; sy = (vh - sh) / 2; }
+            ctx.drawImage(video, sx, sy, sw, sh, 0, 0, targetW, targetH);
+            updateShot(index, c.toDataURL('image/png'));
+        }
+
+        function finish() {
+            isBusy = true; statusDisplay.innerHTML = `<i class="fa-solid fa-check"></i> 完成！生成中...`;
+            setTimeout(() => {
+                isEditing = true;
+                document.getElementById('camera-section').classList.add('hidden');
+                document.getElementById('camera-section').style.display = 'none';
+                document.getElementById('edit-section').style.display = 'flex';
+                initEditor();
+            }, 800);
+        }
+        
+        window.fullReset = () => { location.reload(); };
+
+        function initEditor() {
+            if(!fabricCanvas) fabricCanvas = new fabric.Canvas('c', { isDrawingMode: false });
+            document.getElementById('text-color').value = themes[currentTheme].text;
+            
+            const themeWrapper = document.getElementById('theme-wrapper');
+            themeWrapper.innerHTML = ''; 
+            Object.keys(themes).forEach(key => {
+                const t = themes[key];
+                const div = document.createElement('div');
+                div.className = 'theme-circle' + (key === currentTheme ? ' active' : '');
+                
+                if (t.style === 'image') {
+                    div.style.backgroundImage = `url(${t.src})`;
+                } else {
+                    const canvas = document.createElement('canvas'); canvas.width=60; canvas.height=60;
+                    drawPatternBackground(canvas.getContext('2d'), 60, 60, t);
+                    div.style.backgroundImage = `url(${canvas.toDataURL()})`;
+                }
+                
+                div.onclick = (e) => setTheme(key, e.target);
+                themeWrapper.appendChild(div);
+            });
+            
+            render();
+            window.addEventListener('resize', fitCanvas);
+            document.getElementById('custom-text').addEventListener('input', render);
+            document.addEventListener('keydown', (e) => { if (e.key === 'Delete' || e.key === 'Backspace') deleteSelected(); });
+            setTool('select');
+        }
+
+        window.setTheme = (k, el) => {
+            currentTheme = k;
+            document.querySelectorAll('.theme-circle').forEach(d => d.classList.remove('active'));
+            if(el) el.classList.add('active'); 
+            
+            // 更新 CSS 變數以符合選取的主題色調 (可選)
+            if(themes[k].primary) {
+                document.documentElement.style.setProperty('--primary', themes[k].primary);
+            }
+            document.getElementById('text-color').value = themes[k].text;
+            render();
+        };
+
+        window.setFilter = (f, el) => {
+            currentFilter = f;
+            document.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
+            el.classList.add('active');
+            render();
+        };
+
+        function roundRect(ctx, x, y, w, h, r) {
+            if (w < 2 * r) r = w / 2; if (h < 2 * r) r = h / 2;
+            ctx.beginPath(); ctx.moveTo(x + r, y);
+            ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+            ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r);
+            ctx.closePath(); return ctx;
+        }
+
+        // 重新設計的鄉村風圖案繪製
+        function drawPatternBackground(ctx, w, h, theme) {
+            ctx.fillStyle = theme.bg; ctx.fillRect(0, 0, w, h);
+            const type = theme.style, pColor = theme.patternColor;
+            ctx.fillStyle = pColor; ctx.strokeStyle = pColor;
+            const scale = w < 100 ? 0.3 : 1;
+            
+            if (type === 'dots') { 
+                const s = 40*scale; 
+                for(let x=0;x<w;x+=s) for(let y=0;y<h;y+=s) { 
+                    ctx.beginPath(); ctx.arc(x+((y/s)%2?s/2:0), y, 4*scale, 0, Math.PI*2); ctx.fill(); 
+                } 
+            }
+            else if (type === 'check') { 
+                const s=50*scale; 
+                for(let x=0;x<w;x+=s) for(let y=0;y<h;y+=s) if((x/s+y/s)%2===0) ctx.fillRect(x,y,s,s); 
+            }
+            else if (type === 'clouds') { 
+                for(let i=0;i<(scale<1?5:15);i++) { 
+                    let cx=Math.random()*w, cy=Math.random()*h; 
+                    ctx.beginPath(); ctx.arc(cx, cy, 20*scale, 0, Math.PI*2); 
+                    ctx.arc(cx+15*scale, cy-5*scale, 22*scale, 0, Math.PI*2); 
+                    ctx.arc(cx-15*scale, cy-5*scale, 18*scale, 0, Math.PI*2);
+                    ctx.fill(); 
+                } 
+            }
+            else if (type === 'flowers') {
+                for(let i=0; i<(scale<1?10:50); i++){
+                   let cx = Math.random()*w, cy = Math.random()*h;
+                   let r = 5*scale;
+                   for(let j=0; j<5; j++){
+                       ctx.beginPath();
+                       ctx.arc(cx + Math.cos(j*2*Math.PI/5)*r, cy + Math.sin(j*2*Math.PI/5)*r, r, 0, 2*Math.PI);
+                       ctx.fill();
+                   }
+                   ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(cx, cy, r*0.6, 0, 2*Math.PI); ctx.fill();
+                   ctx.fillStyle = pColor; // reset
+                }
+            }
+            else if (type === 'noise') {
+                // 模擬牛皮紙雜訊
+                for(let i=0; i<w*h/10; i++) {
+                    ctx.fillStyle = Math.random() > 0.5 ? pColor : "#D7CCC8";
+                    ctx.globalAlpha = 0.3;
+                    ctx.fillRect(Math.random()*w, Math.random()*h, 2, 2);
+                }
+                ctx.globalAlpha = 1;
+            }
+            else if (type === 'linen') {
+                ctx.lineWidth = 1; ctx.strokeStyle = pColor;
+                for(let i=0; i<w; i+=4) { ctx.beginPath(); ctx.moveTo(i,0); ctx.lineTo(i,h); ctx.stroke(); }
+                for(let i=0; i<h; i+=4) { ctx.beginPath(); ctx.moveTo(0,i); ctx.lineTo(w,i); ctx.stroke(); }
+            }
+            else if (type === 'leaves') {
+                 for(let i=0; i<(scale<1?10:40); i++){
+                     ctx.save();
+                     ctx.translate(Math.random()*w, Math.random()*h);
+                     ctx.rotate(Math.random()*Math.PI);
+                     ctx.beginPath();
+                     ctx.ellipse(0, 0, 15*scale, 6*scale, 0, 0, Math.PI*2);
+                     ctx.fill();
+                     ctx.restore();
+                 }
+            }
+            else if (type === 'terrazzo') {
+                 const colors = ['#8D6E63', '#A1887F', '#D7CCC8', pColor];
+                 for(let i=0;i<(scale<1?20:100);i++) { 
+                     ctx.fillStyle = colors[Math.floor(Math.random()*colors.length)]; 
+                     ctx.beginPath(); ctx.moveTo(Math.random()*w, Math.random()*h); 
+                     for(let j=0; j<3; j++) ctx.lineTo(Math.random()*w, Math.random()*h); 
+                     ctx.fill(); 
+                 } 
+            }
+            else if (type === 'plaid') {
+                const s = 60*scale;
+                ctx.lineWidth = 20*scale;
+                ctx.globalAlpha = 0.3;
+                for(let x=0;x<w;x+=s) { ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,h); ctx.stroke(); }
+                for(let y=0;y<h;y+=s) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(w,y); ctx.stroke(); }
+                ctx.globalAlpha = 1;
+            }
+            else if (type === 'stripes') {
+                const s = 40*scale;
+                for(let x=0; x<w; x+=s*2) {
+                    ctx.fillRect(x, 0, s, h);
+                }
+            }
+            else if (type === 'grid') {
+                const s=30*scale; ctx.lineWidth=1*scale; 
+                ctx.beginPath(); 
+                for(let i=0;i<=w;i+=s){ctx.moveTo(i,0);ctx.lineTo(i,h);} 
+                for(let i=0;i<=h;i+=s){ctx.moveTo(0,i);ctx.lineTo(w,i);} 
+                ctx.stroke();
+            }
+            else if (type === 'wood') {
+                ctx.lineWidth = 2;
+                for(let i=0; i<20; i++) {
+                    let y = Math.random()*h;
+                    ctx.beginPath();
+                    ctx.moveTo(0, y);
+                    ctx.bezierCurveTo(w/3, y + Math.random()*50, w*2/3, y-Math.random()*50, w, y+Math.random()*20);
+                    ctx.stroke();
+                }
+            }
+        }
+
+        function render() {
+            if(!isEditing) return;
+            const t = themes[currentTheme];
+            const pW = 400, pH = 300, pad = 30, foot = 120;
+            const tW = pW*2 + pad*3, tH = pH*2 + pad*3 + foot;
+            window.orgW = tW; window.orgH = tH;
+
+            const bgC = document.createElement('canvas'); bgC.width = tW; bgC.height = tH;
+            const ctx = bgC.getContext('2d');
+            
+            if (t.style === 'image') {
+                const bgImg = new Image();
+                bgImg.onload = () => {
+                    ctx.clearRect(0,0,tW,tH); 
+                    ctx.drawImage(bgImg, 0, 0, tW, tH); 
+                    processPhotos();
+                };
+                bgImg.onerror = () => {
+                    // 若圖片載入失敗，使用備用的純色背景
+                    drawPatternBackground(ctx, tW, tH, { ...t, style: 'solid', bg: '#f0ebe0' });
+                    processPhotos();
+                }
+                bgImg.src = t.src;
+            } else {
+                drawPatternBackground(ctx, tW, tH, t);
+                processPhotos();
+            }
+
+            function processPhotos() {
+                const showBorder = document.getElementById('toggle-border').checked;
+                const borderWidth = parseInt(document.getElementById('border-width').value);
+                const borderColor = document.getElementById('border-color').value;
+                const radius = parseInt(document.getElementById('border-radius').value);
+                const textStrokeEnabled = document.getElementById('text-stroke-toggle').checked;
+                const textStrokeColor = document.getElementById('text-stroke-color').value;
+                const textStrokeWidth = parseInt(document.getElementById('text-stroke-width').value);
+
+                let loadedCount = 0;
+                const validShots = shots.map(s => s || "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7");
+
+                validShots.forEach((src, i) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        const col = i % 2, row = Math.floor(i / 2);
+                        const x = pad + col * (pW + pad), y = pad + row * (pH + pad);
+
+                        ctx.save();
+                        roundRect(ctx, x, y, pW, pH, radius); ctx.clip();
+                        if(currentFilter !== 'none') ctx.filter = currentFilter;
+                        
+                        const iRatio = img.width/img.height, fRatio = pW/pH;
+                        let dw=pW, dh=pH, dx=0, dy=0;
+                        if(iRatio > fRatio) { dw=pH*iRatio; dx=(pW-dw)/2; } else { dh=pW/iRatio; dy=(pH-dh)/2; }
+                        ctx.drawImage(img, x+dx, y+dy, dw, dh);
+                        ctx.restore();
+
+                        if (showBorder && borderWidth > 0) {
+                            ctx.save(); ctx.lineWidth = borderWidth; ctx.strokeStyle = borderColor;
+                            roundRect(ctx, x, y, pW, pH, radius); ctx.stroke(); ctx.restore();
+                        }
+
+                        loadedCount++;
+                        if(loadedCount === 4) {
+                            ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                            ctx.font = `bold 32px ${document.getElementById('font-family').value}`;
+                            const now = new Date();
+                            const dateStr = `${now.getFullYear()}.${String(now.getMonth()+1).padStart(2,'0')}.${String(now.getDate()).padStart(2,'0')}`;
+                            const input = document.getElementById('custom-text').value.trim();
+                            const txt = `SXHS Photo${input ? ' ｜ '+input : ''} ｜ ${dateStr}`;
+                            const tx = tW/2, ty = tH - 50;
+
+                            if (textStrokeEnabled) {
+                                ctx.save(); ctx.strokeStyle = textStrokeColor; ctx.lineWidth = textStrokeWidth;
+                                ctx.lineJoin = 'round'; ctx.miterLimit = 2; ctx.strokeText(txt, tx, ty); ctx.restore();
+                            }
+                            ctx.fillStyle = document.getElementById('text-color').value;
+                            ctx.fillText(txt, tx, ty);
+
+                            fabricCanvas.setDimensions({ width: tW, height: tH });
+                            
+                            const bgInstance = new fabric.Image(bgC);
+                            fabricCanvas.setBackgroundImage(bgInstance, fabricCanvas.renderAll.bind(fabricCanvas));
+                            fitCanvas();
+                        }
+                    };
+                    img.src = src;
+                });
+            }
+        }
+
+        function fitCanvas() {
+            if(!window.orgW) return;
+            const scale = Math.min((document.querySelector('.app-shell').clientWidth - 40) / window.orgW, 1);
+            document.getElementById('canvas-wrapper').style.transform = `scale(${scale})`;
+            document.getElementById('canvas-wrapper').style.width = `${window.orgW}px`;
+            document.getElementById('canvas-wrapper').style.height = `${window.orgH}px`;
+            document.getElementById('canvas-scale-container').style.height = `${window.orgH * scale}px`;
+        }
+
+        window.scrollContainer = function(id, dir) { document.getElementById(id).scrollBy({ left: dir * 150, behavior: 'smooth' }); };
+        
+        window.setTool = (name) => {
+            const btnS = document.getElementById('btn-select'), btnD = document.getElementById('btn-draw');
+            fabricCanvas.isDrawingMode = (name === 'draw');
+            if(name === 'draw') { 
+                btnS.classList.remove('active'); btnD.classList.add('active'); 
+                const b = new fabric.PencilBrush(fabricCanvas);
+                b.color = document.getElementById('pen-color').value; b.width = 8; b.strokeLineCap = 'round'; // 筆觸調整圓潤一點
+                fabricCanvas.freeDrawingBrush = b;
+            } else { btnS.classList.add('active'); btnD.classList.remove('active'); }
+        };
+
+        window.addImageSticker = (url) => {
+            setTool('select');
+            const imgOptions = window.location.protocol !== 'file:' ? { crossOrigin: 'anonymous' } : {};
+            fabric.Image.fromURL(url, (img) => {
+                if(!img) return;
+                img.scaleToWidth(150);
+                img.set({ left: fabricCanvas.width/2, top: fabricCanvas.height/2, originX:'center', originY:'center' });
+                fabricCanvas.add(img); fabricCanvas.setActiveObject(img);
+            }, imgOptions);
+        };
+        window.addSticker = (s) => {
+            setTool('select');
+            const t = new fabric.Text(s, { left:fabricCanvas.width/2, top:fabricCanvas.height/2, originX:'center', originY:'center', fontSize:100 });
+            fabricCanvas.add(t); fabricCanvas.setActiveObject(t);
+        };
+        
+        window.updateBrush = () => { if(fabricCanvas.freeDrawingBrush) fabricCanvas.freeDrawingBrush.color = document.getElementById('pen-color').value; };
+        window.undoLastStroke = () => { const objs = fabricCanvas.getObjects(); for(let i=objs.length-1; i>=0; i--) if(objs[i].type==='path'){fabricCanvas.remove(objs[i]);break;} };
+        window.deleteSelected = () => { const o = fabricCanvas.getActiveObject(); if(o) fabricCanvas.remove(o); };
+        
+        window.downloadImage = () => {
+            fabricCanvas.discardActiveObject(); fabricCanvas.renderAll();
+            try {
+                const link = document.createElement('a');
+                link.download = `SXHS_NaturePhoto_${Date.now()}.png`;
+                link.href = fabricCanvas.toDataURL({ format: 'png', multiplier: 1 });
+                document.body.appendChild(link); link.click(); document.body.removeChild(link);
+            } catch(e) {
+                alert("因瀏覽器安全性限制 (Tainted Canvas)，本機圖片無法直接下載。\n\n建議您使用螢幕截圖，或將此網頁放上網頁伺服器執行。");
+            }
+        };
+        
+        setMode('auto');
+
+        const mascot = document.querySelector('.mascot-container');
+        let isDraggingMascot = false; let dragStartX, dragStartY;
+        function startDrag(e) {
+            isDraggingMascot = true; mascot.style.cursor = 'grabbing';
+            const clientX = e.clientX || e.touches[0].clientX; const clientY = e.clientY || e.touches[0].clientY;
+            const rect = mascot.getBoundingClientRect(); dragStartX = clientX - rect.left; dragStartY = clientY - rect.top; e.preventDefault();
+        }
+        function onDrag(e) {
+            if (!isDraggingMascot) return; e.preventDefault();
+            const clientX = e.clientX || e.touches[0].clientX; const clientY = e.clientY || e.touches[0].clientY;
+            const x = clientX - dragStartX; const y = clientY - dragStartY;
+            mascot.style.bottom = 'auto'; mascot.style.right = 'auto'; mascot.style.left = `${x}px`; mascot.style.top = `${y}px`;
+        }
+        function stopDrag() { isDraggingMascot = false; mascot.style.cursor = 'grab'; }
+        mascot.addEventListener('mousedown', startDrag); mascot.addEventListener('touchstart', startDrag, {passive: false});
+        window.addEventListener('mousemove', onDrag); window.addEventListener('touchmove', onDrag, {passive: false});
+        window.addEventListener('mouseup', stopDrag); window.addEventListener('touchend', stopDrag);
+    </script>
+</body>
+</html>

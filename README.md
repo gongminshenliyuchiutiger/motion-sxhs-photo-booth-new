@@ -1,1 +1,1 @@
-# motion-sxhs-photo-booth-new
+# motion-sxhs-photo-booth
